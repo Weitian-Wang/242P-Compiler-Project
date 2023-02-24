@@ -1,0 +1,23 @@
+digraph G{
+bb0[shape=record, label="<b>BB0|{0: const #0|11: const #1}"];
+bb1[shape=record, label="<b>BB1|{1: add (0) (0)|2: add (0) (0)|3: cmp (0) (0)|4: bge (3) (11)}"];
+bb2[shape=record, label="<b>BB2|{5: add (1) (2)|6: cmp (5) (0)|7: beq (6) (9)}"];
+bb3[shape=record, label="<b>BB3|{8: bra}"];
+bb4[shape=record, label="<b>BB4|{9: phi (0) (5)|10: bra (19)}"];
+bb5[shape=record, label="<b>BB5|{12: cmp (2) (11)|13: blt (12) (15)}"];
+bb6[shape=record, label="<b>BB6|{14: bra (16)}"];
+bb8[shape=record, label="<b>BB8|{15: phi (11) (0)}"];
+bb9[shape=record, label="<b>BB9|{16: phi (0) (9)|17: phi (0) (5)|18: phi (15) (2)}"];
+bb0:s -> bb1:n [label="fall-through"];
+bb1:s -> bb5:n [label="branch"];
+bb1:s -> bb2:n [label="fall-through"];
+bb2:s -> bb4:n [label="branch"];
+bb2:s -> bb3:n [label="fall-through"];
+bb3:s -> bb4:n [label="branch"];
+bb4:s -> bb9:n [label="branch"];
+bb5:s -> bb7:n [label="branch"];
+bb5:s -> bb6:n [label="fall-through"];
+bb6:s -> bb8:n [label="branch"];
+bb7:s -> bb8:n [label="fall-through"];
+bb8:s -> bb9:n [label="fall-through"];
+}

@@ -47,9 +47,9 @@ token_table = {
 
 # new id of identifier = len(ident) + 1
 ident = {
-    "InputNum":1,
-    "OutputNum":2,
-    "OutputNewLine":3
+    "InputNum":0,
+    "OutputNum":1,
+    "OutputNewLine":2
 }
 
 class FileReader():
@@ -106,7 +106,8 @@ class Tokenizer():
             # keyword
             if word in token_table:
                 token = token_table[word]
-            # variable
+            # variable or function?
+            # TODO
             else:
                 token = 61
                 self.id = word
@@ -115,10 +116,8 @@ class Tokenizer():
             self.next()
         elif self.inputSym == ".":
             token = token_table["."]
-            # don't call next()
             self.next()
-            # otherwise file reader will read eof
-            # cause premature exit
+            # call next and get eof token 255
         elif self.inputSym in ["=","!","<",">"]:
             if self.inputSym == "=":
                 self.next()
@@ -153,7 +152,7 @@ class Tokenizer():
                     token = token_table[">"]
         # handling eof
         elif self.inputSym == "":
-                return -255
+            return 255
         # handling space tab and line change
         else:
             if self.inputSym == "\n":
@@ -166,10 +165,13 @@ class Tokenizer():
         return token
     
     # can't think about elegant variable table solution
-    # double dictionary?
-    # TODO
     def Id2String(self, id):
-        pass
+        for k, v in ident:
+            if v == id:
+                return k
+        return None
 
     def String2Id(self, name):
-        pass
+        if name not in ident:
+            ident[name] = len(ident)
+        return ident[name] 
