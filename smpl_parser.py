@@ -110,8 +110,7 @@ class IR:
         file = open('graph_description', 'w+')
         file.write('digraph G{\n')
         for bb in self.bb_list:
-            if bb.instruction_list:
-                file.write(bb.instructionToGraph()+'\n')
+            file.write(bb.instructionToGraph()+'\n')
         for bb in self.bb_list:
             if bb.branch:
                 file.write(bb.branchToGraph()+'\n')
@@ -156,7 +155,7 @@ class IR:
         target.ssa_table[id] = instruction_id
 
     # add instruction to current bb
-    def addInstruction(self, op_code, operant1 = None, operant2 = None, target: Basic_Block = None):
+    def addInstruction(self, op_code: str, operant1 = None, operant2 = None, target: Basic_Block = None):
         if target is None:
             target = self.bb_list[self.bb_count]
         instruction = Instruction(self.pc, op_code, operant1, operant2)
@@ -219,6 +218,7 @@ class Parser:
         self.checkFor(80)
         # "."
         self.checkFor(30)
+        self.ir.addInstruction("end")
     
     # { varDecl } "{" [ statSequence ] "}"
     def funcBody(self):
@@ -346,6 +346,14 @@ class Parser:
     # "call" ident [ "(" [expression { "," expression } ] ")" ]
     def funcCall(self):
         self.checkFor(101)
+        function_name = self.tokenizer.id
+        function_instruction = None
+        if function_name == "InputNum":
+            function_instruction = self.ir.addInstruction("read")
+        elif function_name == "OutputNum":
+            function_instruction = self.ir.addInstruction("write")
+        elif function_name == "OutputNewLine":
+            function_instruction = self.ir.addInstruction("writeNL")
         self.checkFor(61)
         # function with parentheses
         if self.inputSym == 50:
@@ -357,7 +365,7 @@ class Parser:
             # = "("...
             # = funcCall = "call"...
             if self.inputSym in [60, 61, 50, 101]:
-                self.expression()
+                function_instruction.operant1 = self.expression()
                 # ","
                 while self.inputSym == 31:
                     self.checkFor(31)
@@ -365,12 +373,13 @@ class Parser:
                 # matching closing parenthese
             self.checkFor(35)
         # function without parentheses, no parameters allowed
+        return function_instruction.instruction_id
     
     # "if" relation "then" statSequence [ "else" statSequence ] "fi"
     # create a branch bb, a fall through bb, a join bb
     def ifStatement(self):
         self.checkFor(102)
-        branch_instruction = self.relation()
+        base_branch_instruction = self.relation()
         parent_bb = self.ir.bb_list[self.ir.bb_count]
 
         # fall through
@@ -380,13 +389,13 @@ class Parser:
         # if more statement happend in statSequence
         # update fall through to the join block of fall throught
         fall_through_bb = self.ir.bb_list[self.ir.bb_count]
-        # for branching to join block
-        self.ir.addInstruction('bra', None)
+        # for the fall through block branching back to join block
+        ft_branch_instruction = self.ir.addInstruction('bra', None)
 
         # optional "else" sequence, branch
         if self.inputSym == 90:
             # BUG FIX NUMBERING IF NEXT INSTRUCTION CONSTANT
-            branch_instruction.operant2 = self.ir.pc
+            base_branch_instruction.operant2 = self.ir.pc
             self.ir.addBB(branch=True, parent=parent_bb)
             self.checkFor(90)
             self.statSequence()
@@ -396,14 +405,15 @@ class Parser:
             # do we really need a parents list?
             join_bb.parents = [branch_bb, fall_through_bb]
             fall_through_bb.branch = join_bb
-            self.ir.addPhi(join_bb, branch_bb, fall_through_bb)
             #  BUG FIX NUMBERING IF NEXT INSTRUCTION CONSTANT
             fall_through_bb.instruction_list[-1].operant1 = self.ir.pc
+            self.ir.addPhi(join_bb, branch_bb, fall_through_bb)
         # no else
         else:
-            #  BUG FIX NUMBERING IF NEXT INSTRUCTION CONSTANT
-            branch_instruction.operant2 = self.ir.pc
             join_bb = self.ir.addBB(branch=True, parent=fall_through_bb)
+            #  BUG FIX NUMBERING IF NEXT INSTRUCTION CONSTANT
+            base_branch_instruction.operant2 = self.ir.pc
+            ft_branch_instruction.operant1 = self.ir.pc
             join_bb.parents = [fall_through_bb, parent_bb]
             parent_bb.branch = join_bb
             self.ir.addPhi(join_bb, parent_bb, fall_through_bb)
