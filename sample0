@@ -1,16 +1,18 @@
-main
-var a,b,c,d,e;
+main 
+var x,y,i,j; 
 {
-    let a<-call InputNum(); 
-    let b<-a; 
-    let c<-b; 
-    let d<- b+ c; 
-    let e <-a+b;
-    if a<0 then 
-        let d<-d+e; 
-        let a<- d 
-    else 
-        let d<- e  
-    fi;
-    call OutputNum(a)
+    let i<-call InputNum(); 
+    let x<-0; 
+    let y<-0; 
+    let j<- i; 
+    while x<10 do  
+        let x <- i + 1; 
+        if x > 0 then 
+            let x <- j + 1 
+        else 
+            let y <- i + 1 
+        fi; 
+        let i <-i + 1 
+    od; 
+    call OutputNum(x)
 }.

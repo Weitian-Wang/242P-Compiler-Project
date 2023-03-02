@@ -34,8 +34,6 @@ class Instruction:
         self.op_code: str = op_code
         self.operant1: int = operant1
         self.operant2: int = operant2
-        # pointer for chain of dominance, for CSE
-        self.dominator: Instruction = None
 
     def toString(self) -> str:
         if self.op_code == "const":
@@ -45,15 +43,15 @@ class Instruction:
 class Basic_Block:
     def __init__(self, bb_id):
         self.bb_id: int = bb_id
-        self.parents: List[Basic_Block] = []
-        # at most two children ?
+        # at most two children
         self.branch: Basic_Block = None
         self.fall_through: Basic_Block = None
-        # the bb that dominates the current block
-        self.dominates: List[Basic_Block] = []
         # variable name: value instruction number
         self.ssa_table: Dict[str, int] = {}
         self.instruction_list: List[Instruction] = []
+        # dominator of current block = self and dominator of dominators
+        self.dominator: set[Basic_Block] = set()
+        self.dominator.add(self)
 
     def instructionToGraph(self):
         instruction_str = '|'.join([instruction.toString() for instruction in self.instruction_list])
@@ -72,12 +70,13 @@ class Basic_Block:
         rst = f'bb{self.bb_id}:s -> bb{self.fall_through.bb_id}:n [label="fall-through"];'
         return rst
     
-    def dominatesToGraph(self):
+    def dominatorToGraph(self):
         rst = ""
-        if not self.dominates:
+        if not self.dominator:
             return rst
-        for dominated_block in self.dominates:
-            rst += f'bb{self.bb_id}:b -> bb{dominated_block.bb_id}:b [color=blue, style=dotted, lable="dom"];' + "\n"
+        for dominator in self.dominator:
+            if dominator != self:
+                rst += f'bb{dominator.bb_id}:b -> bb{self.bb_id}:b [color=blue, style=dotted, lable="dom"];' + "\n"
         return rst
 
 class IR:
@@ -116,8 +115,8 @@ class IR:
                 file.write(bb.branchToGraph()+'\n')
             if bb.fall_through:
                 file.write(bb.fallThroughToGraph()+'\n')
-            if bb.dominates:
-                file.write(bb.dominatesToGraph())
+            # if bb.dominator:
+                # file.write(bb.dominatorToGraph())
         file.write('}')
     
     def printSSA(self):
@@ -158,6 +157,11 @@ class IR:
     def addInstruction(self, op_code: str, operant1 = None, operant2 = None, target: Basic_Block = None):
         if target is None:
             target = self.bb_list[self.bb_count]
+        # Common Subexpression Elimination
+        for dominator in target.dominator:
+            for instruction in dominator.instruction_list:
+                if instruction.op_code == op_code and instruction.operant1 == operant1 and instruction.operant2 == operant2:
+                    return instruction
         instruction = Instruction(self.pc, op_code, operant1, operant2)
         target.instruction_list.append(instruction)
         self.pc += 1
@@ -175,6 +179,12 @@ class IR:
             if left_inst_id != right_inst_id:
                 join_bb.ssa_table[ident] = self.addInstruction(op_code='phi', operant1=left_inst_id, operant2=right_inst_id, target=join_bb).instruction_id
 
+    def addWhilePhi(self, loop_header_bb, loop_body_bb):
+        pass
+
+    def addDominator(self, target_bb: Basic_Block, dominator_bb: Basic_Block):
+        for bb in dominator_bb.dominator:
+            target_bb.dominator.add(bb)
 
     # use a set to eliminate common subexpression within same basic block
     # global cse, link operation to the same operations in dominant blocks
@@ -384,33 +394,36 @@ class Parser:
 
         # fall through
         self.checkFor(41)
-        self.ir.addBB(fall_through=True)
+        fall_through_bb = self.ir.addBB(fall_through=True)
+        self.ir.addDominator(fall_through_bb, parent_bb)
+        
         self.statSequence()
         # if more statement happend in statSequence
         # update fall through to the join block of fall throught
         fall_through_bb = self.ir.bb_list[self.ir.bb_count]
         # for the fall through block branching back to join block
         ft_branch_instruction = self.ir.addInstruction('bra', None)
-
         # optional "else" sequence, branch
         if self.inputSym == 90:
             # BUG FIX NUMBERING IF NEXT INSTRUCTION CONSTANT
             base_branch_instruction.operant2 = self.ir.pc
-            self.ir.addBB(branch=True, parent=parent_bb)
+            branch_bb = self.ir.addBB(branch=True, parent=parent_bb)
+            self.ir.addDominator(branch_bb, parent_bb)
             self.checkFor(90)
             self.statSequence()
             branch_bb = self.ir.bb_list[self.ir.bb_count]
             # join block
             join_bb = self.ir.addBB(fall_through=True, parent=branch_bb)
-            # do we really need a parents list?
-            join_bb.parents = [branch_bb, fall_through_bb]
+            self.ir.addDominator(join_bb, parent_bb)
             fall_through_bb.branch = join_bb
             #  BUG FIX NUMBERING IF NEXT INSTRUCTION CONSTANT
             fall_through_bb.instruction_list[-1].operant1 = self.ir.pc
             self.ir.addPhi(join_bb, branch_bb, fall_through_bb)
+            self.ir.addDominator(branch_bb, parent_bb)
         # no else
         else:
             join_bb = self.ir.addBB(branch=True, parent=fall_through_bb)
+            self.ir.addDominator(join_bb, parent_bb)
             #  BUG FIX NUMBERING IF NEXT INSTRUCTION CONSTANT
             base_branch_instruction.operant2 = self.ir.pc
             ft_branch_instruction.operant1 = self.ir.pc
@@ -422,10 +435,23 @@ class Parser:
     # "while" relateion "do" statSequence "od"
     def whileStatement(self):
         self.checkFor(103)
-        self.relation()
+        # upstream bb and loop header
+        base_bb = self.ir.bb_list[self.ir.bb_count]
+        loop_header = self.ir.addBB(fall_through=True, parent=base_bb)
+        self.ir.addDominator(loop_header, base_bb)
+        while_branch_instruction = self.relation()
+        # fall-through loop body
         self.checkFor(42)
+        loop_body = self.ir.addBB(fall_through=True, parent=loop_header)
+        self.ir.addDominator(loop_body, loop_header)
         self.statSequence()
+        loop_body = self.ir.bb_list[self.ir.bb_count]
+        loop_body.fall_through = loop_header
+        # follow
         self.checkFor(81)
+        while_branch_instruction.operant2 = self.ir.pc
+        follow_bb = self.ir.addBB(branch=True, parent=loop_header)
+        self.ir.addDominator(follow_bb, loop_header)
     
     # "return" [ expression ]
     def returnStatement(self):
