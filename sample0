@@ -1,5 +1,6 @@
 main 
-var x,y,i,j; 
+var x,y,i,j;
+array[3] z; 
 {
     let i<-call InputNum(); 
     let x<-0; 

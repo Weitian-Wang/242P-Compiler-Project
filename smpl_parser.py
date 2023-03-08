@@ -158,10 +158,12 @@ class IR:
         if target is None:
             target = self.bb_list[self.bb_count]
         # Common Subexpression Elimination
-        for dominator in target.dominator:
-            for instruction in dominator.instruction_list:
-                if instruction.op_code == op_code and instruction.operant1 == operant1 and instruction.operant2 == operant2:
-                    return instruction
+        # Exclude phi
+        if op_code != "phi":
+            for dominator in target.dominator:
+                for instruction in dominator.instruction_list:
+                    if instruction.op_code == op_code and instruction.operant1 == operant1 and instruction.operant2 == operant2:
+                        return instruction
         instruction = Instruction(self.pc, op_code, operant1, operant2)
         target.instruction_list.append(instruction)
         self.pc += 1
@@ -179,17 +181,27 @@ class IR:
             if left_inst_id != right_inst_id:
                 join_bb.ssa_table[ident] = self.addInstruction(op_code='phi', operant1=left_inst_id, operant2=right_inst_id, target=join_bb).instruction_id
 
-    def addWhilePhi(self, loop_header_bb, loop_body_bb):
-        pass
+    def reserveWhilePhi(self, loop_header_bb: Basic_Block):
+        for ident, inst_id in loop_header_bb.ssa_table.items():
+            # if not initialized set to constant 0
+            left_inst_id = loop_header_bb.ssa_table.get(ident, None)
+            right_inst_id = loop_header_bb.ssa_table.get(ident, None)
+            loop_header_bb.ssa_table[ident] = self.addInstruction(op_code='phi', operant1=left_inst_id, operant2=right_inst_id, target=loop_header_bb).instruction_id
+
+    def updateWhilePhi(self, loop_header_bb: Basic_Block, loop_body_bb: Basic_Block):
+         for idx, (ident, inst_id) in enumerate(loop_header_bb.ssa_table.items()):
+            # if not initialized set to constant 0
+            right_inst_id = loop_body_bb.ssa_table.get(ident, None)
+            if loop_header_bb.instruction_list[idx].instruction_id != inst_id:
+                print("Wrong Phi function!")
+            if loop_header_bb.instruction_list[idx].instruction_id == right_inst_id:
+                continue
+            loop_header_bb.instruction_list[idx].operant2 = right_inst_id
 
     def addDominator(self, target_bb: Basic_Block, dominator_bb: Basic_Block):
         for bb in dominator_bb.dominator:
             target_bb.dominator.add(bb)
 
-    # use a set to eliminate common subexpression within same basic block
-    # global cse, link operation to the same operations in dominant blocks
-    def cse(self):
-        pass
 
 class Parser:
     def __init__(self, filename):
@@ -438,6 +450,7 @@ class Parser:
         # upstream bb and loop header
         base_bb = self.ir.bb_list[self.ir.bb_count]
         loop_header = self.ir.addBB(fall_through=True, parent=base_bb)
+        self.ir.reserveWhilePhi(loop_header)
         self.ir.addDominator(loop_header, base_bb)
         while_branch_instruction = self.relation()
         # fall-through loop body
@@ -446,9 +459,12 @@ class Parser:
         self.ir.addDominator(loop_body, loop_header)
         self.statSequence()
         loop_body = self.ir.bb_list[self.ir.bb_count]
-        loop_body.fall_through = loop_header
+        loop_body.branch = loop_header
+        self.ir.addInstruction('bra', operant1=loop_header.instruction_list[0].instruction_id, target=loop_body)
+        # self.ir.addPhi(loop_header, loop_body, loop_header)
         # follow
         self.checkFor(81)
+        self.ir.updateWhilePhi(loop_header, loop_body)
         while_branch_instruction.operant2 = self.ir.pc
         follow_bb = self.ir.addBB(branch=True, parent=loop_header)
         self.ir.addDominator(follow_bb, loop_header)
