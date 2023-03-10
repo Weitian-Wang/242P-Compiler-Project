@@ -175,3 +175,9 @@ class Tokenizer():
         if name not in ident:
             ident[name] = len(ident)
         return ident[name] 
+    
+    def snapshot(self):
+        return self.filereader.file.tell()
+
+    def rewind(self, position):
+        self.filereader.file.seek(position)

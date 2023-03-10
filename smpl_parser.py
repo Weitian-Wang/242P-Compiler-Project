@@ -181,22 +181,21 @@ class IR:
             if left_inst_id != right_inst_id:
                 join_bb.ssa_table[ident] = self.addInstruction(op_code='phi', operant1=left_inst_id, operant2=right_inst_id, target=join_bb).instruction_id
 
-    def reserveWhilePhi(self, loop_header_bb: Basic_Block):
+    def reserveWhilePhi(self, loop_header_bb: Basic_Block, ssa_table_ahead):
         for ident, inst_id in loop_header_bb.ssa_table.items():
             # if not initialized set to constant 0
             left_inst_id = loop_header_bb.ssa_table.get(ident, None)
-            right_inst_id = loop_header_bb.ssa_table.get(ident, None)
-            loop_header_bb.ssa_table[ident] = self.addInstruction(op_code='phi', operant1=left_inst_id, operant2=right_inst_id, target=loop_header_bb).instruction_id
+            right_inst_id = ssa_table_ahead.get(ident, None)
+            if left_inst_id != right_inst_id:
+                # set operant2 to identifier to search later
+                loop_header_bb.ssa_table[ident] = self.addInstruction(op_code='phi', operant1=left_inst_id, operant2=ident, target=loop_header_bb).instruction_id
 
     def updateWhilePhi(self, loop_header_bb: Basic_Block, loop_body_bb: Basic_Block):
-         for idx, (ident, inst_id) in enumerate(loop_header_bb.ssa_table.items()):
-            # if not initialized set to constant 0
-            right_inst_id = loop_body_bb.ssa_table.get(ident, None)
-            if loop_header_bb.instruction_list[idx].instruction_id != inst_id:
-                print("Wrong Phi function!")
-            if loop_header_bb.instruction_list[idx].instruction_id == right_inst_id:
-                continue
-            loop_header_bb.instruction_list[idx].operant2 = right_inst_id
+         for phi in loop_header_bb.instruction_list:
+            if phi.op_code != 'phi':
+                break
+            ident = phi.operant2
+            phi.operant2 = loop_body_bb.ssa_table[ident]
 
     def addDominator(self, target_bb: Basic_Block, dominator_bb: Basic_Block):
         for bb in dominator_bb.dominator:
@@ -351,7 +350,28 @@ class Parser:
             self.ifStatement()
         # "while"
         elif self.inputSym == 103:
-            self.whileStatement()
+            # snapshot current status
+            position = self.tokenizer.snapshot()
+            pc = self.ir.pc
+            bb = self.ir.bb_count
+            ssa_table_ahead = self.whileStatement(preRun=True)
+            # recover status
+            self.tokenizer.rewind(position)
+            # clear const instructions in bb0
+            new_bb0_list = []
+            for instruction in self.ir.bb_list[0].instruction_list:
+                # the first instruction that exceeds pc
+                if pc <= instruction.instruction_id < self.ir.pc:
+                    continue
+                else:
+                    new_bb0_list.append(instruction)
+            self.ir.bb_list[0].instruction_list = new_bb0_list
+            self.ir.bb_list = self.ir.bb_list[:bb+1]
+            self.ir.pc = pc
+            self.ir.bb_count = bb
+            self.next()
+            # actual run of the while statement
+            self.whileStatement(preRun=False, ssa_table_ahead=ssa_table_ahead)
         # "return"
         elif self.inputSym == 104:
             self.returnStatement()
@@ -445,12 +465,15 @@ class Parser:
         self.checkFor(82)
 
     # "while" relateion "do" statSequence "od"
-    def whileStatement(self):
-        self.checkFor(103)
+    def whileStatement(self, preRun = False, ssa_table_ahead = {}):
         # upstream bb and loop header
         base_bb = self.ir.bb_list[self.ir.bb_count]
         loop_header = self.ir.addBB(fall_through=True, parent=base_bb)
-        self.ir.reserveWhilePhi(loop_header)
+        if preRun:
+            self.checkFor(103)
+            # basically do nothing in preRun
+            ssa_table_ahead = loop_header.ssa_table
+        self.ir.reserveWhilePhi(loop_header, ssa_table_ahead)
         self.ir.addDominator(loop_header, base_bb)
         while_branch_instruction = self.relation()
         # fall-through loop body
@@ -464,10 +487,13 @@ class Parser:
         # self.ir.addPhi(loop_header, loop_body, loop_header)
         # follow
         self.checkFor(81)
-        self.ir.updateWhilePhi(loop_header, loop_body)
+        if not preRun:
+            self.ir.updateWhilePhi(loop_header, loop_body)
         while_branch_instruction.operant2 = self.ir.pc
         follow_bb = self.ir.addBB(branch=True, parent=loop_header)
         self.ir.addDominator(follow_bb, loop_header)
+        if preRun:
+            return loop_body.ssa_table
     
     # "return" [ expression ]
     def returnStatement(self):
