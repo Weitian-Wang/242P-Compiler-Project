@@ -1,17 +1,16 @@
-main 
-var x,y,i,j; 
-array[4] a; 
+main
+var a, b;
+array[4][3][2] x;
 {
-    let i<-call InputNum(); 
-    let x<-0; 
-    let y<-0; 
-    let j<-i; 
-    let a[x] <- i; 
-    while a[x]<10 do 
-        let j <- i + 1; 
-        let a[x] <- a[x] + 1; 
-        let i <-i + 1 
-    od; 
-    call OutputNum(j); 
-    call OutputNum(a[x])
+    let a <- call InputNum ();
+    let b <- a; 
+    let i <- 0;
+    let j <- i;
+    let x[a][i][b] <- b + 2;
+    if b<= 2 then 
+        let x[b][j][a] <- x[a][j][b] + 2 
+    else 
+        let b <- x[a][i][b] + 2 
+    fi; 
+    call OutputNum(x[a][i][b])
 }.

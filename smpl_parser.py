@@ -39,7 +39,7 @@ class Instruction:
         if self.op_code == "const":
             return f'{self.instruction_id}: {self.op_code}' + f' #{self.operant1}'
         return f'{self.instruction_id}: {self.op_code}' + (f' ({self.operant1})' if self.operant1 is not None else '') + (f' ({self.operant2})' if self.operant2 is not None else '')
-    
+
 class Basic_Block:
     def __init__(self, bb_id):
         self.bb_id: int = bb_id
@@ -50,8 +50,8 @@ class Basic_Block:
         self.ssa_table: Dict[str, int] = {}
         self.instruction_list: List[Instruction] = []
         # dominator of current block = self and dominator of dominators
-        self.dominator: set[Basic_Block] = set()
-        self.dominator.add(self)
+        self.dominator: List[Basic_Block] = []
+        self.dominator.append(self)
 
     def instructionToGraph(self):
         instruction_str = '|'.join([instruction.toString() for instruction in self.instruction_list])
@@ -96,7 +96,7 @@ class IR:
         self.bb_count += 1
         newBB = Basic_Block(self.bb_count)
         # newBB.ssa_table = parent.ssa_table is shallow copy
-        newBB.ssa_table = parent.ssa_table.copy()
+        newBB.ssa_table = {k:v if type(v) == int else v[:] for k,v in parent.ssa_table.items()}
 
         self.bb_list.append(newBB)
         if fall_through:
@@ -121,7 +121,8 @@ class IR:
     
     def printSSA(self):
         for bb in self.bb_list:
-            print(bb.bb_id, {k: v for k,v in bb.ssa_table.items() if type(v) == int})
+            # print(bb.bb_id, {k: v for k,v in bb.ssa_table.items() if type(v) == int})
+            print(bb.bb_id, bb.ssa_table)
 
     # return const instruction id if constant exits
     # else create new constant then return instruction id
@@ -157,6 +158,7 @@ class IR:
     def addInstruction(self, op_code: str, operant1 = None, operant2 = None, target: Basic_Block = None):
         if target is None:
             target = self.bb_list[self.bb_count]
+
         # Common Subexpression Elimination
         # Exclude phi
         if op_code != "phi":
@@ -164,11 +166,32 @@ class IR:
                 for instruction in dominator.instruction_list:
                     if instruction.op_code == op_code and instruction.operant1 == operant1 and instruction.operant2 == operant2:
                         return instruction
+        
         instruction = Instruction(self.pc, op_code, operant1, operant2)
         target.instruction_list.append(instruction)
         self.pc += 1
         return instruction
     
+    def addLoadInstruction(self, array_id, operant=None, target: Basic_Block = None):
+        if target is None:
+            target = self.bb_list[self.bb_count]
+        # search the closest dominator then the most distant
+        kill_flag = False
+        for dominator in target.dominator:
+            for instruction in reversed(dominator.instruction_list):
+                # search no further beyond kill instruction in the nearest dominator bb
+                if instruction.op_code == "kill" and instruction.operant1 == array_id:
+                    kill_flag = True
+                    break
+                if instruction.op_code == "load" and instruction.operant1 == operant:
+                    return instruction
+            if kill_flag:
+                break
+        instruction = Instruction(self.pc, "load", operant1=operant)
+        target.instruction_list.append(instruction)
+        self.pc += 1
+        return instruction
+        
     def addPhi(self, join_bb: Basic_Block, left_bb: Basic_Block, right_bb: Basic_Block):
         for ident, inst_id in join_bb.ssa_table.items():
             # if not initialized set to constant 0
@@ -178,6 +201,10 @@ class IR:
                 self.getIdent(id=ident, target=right_bb)
             left_inst_id = left_bb.ssa_table.get(ident, None)
             right_inst_id = right_bb.ssa_table.get(ident, None)
+            if type(left_inst_id) == list:
+                # join inherit 
+                join_bb.ssa_table[ident] = [left_inst_id[0], left_inst_id[1], left_inst_id[2] or right_inst_id[2]]
+                continue
             if left_inst_id != right_inst_id:
                 join_bb.ssa_table[ident] = self.addInstruction(op_code='phi', operant1=left_inst_id, operant2=right_inst_id, target=join_bb).instruction_id
 
@@ -199,7 +226,8 @@ class IR:
 
     def addDominator(self, target_bb: Basic_Block, dominator_bb: Basic_Block):
         for bb in dominator_bb.dominator:
-            target_bb.dominator.add(bb)
+            # the closest dominator in the front, the distant dominator in the back
+            target_bb.dominator.append(bb)
 
 
 class Parser:
@@ -260,7 +288,6 @@ class Parser:
         self.checkFor(80)
 
     # "(" [ident { "," ident }] ")"
-    # TODO array of params
     def formalParam(self):
         # "("
         self.checkFor(50)
@@ -299,7 +326,11 @@ class Parser:
         if type == "array":
             # add array base address to bb0 as const
             base_addr = self.ir.immediate(value = f'{self.tokenizer.id}_addr')
-            self.ir.setIdent(id=self.tokenizer.id, instruction_id = [base_addr, dimension_list])
+            # status    stored_flag
+            #           False       
+            #           True        
+            # in ssa table store [base_addr, dimension_list, stored_flag]
+            self.ir.setIdent(id=self.tokenizer.id, instruction_id = [base_addr, dimension_list, False])
         while self.inputSym == 31:
             self.checkFor(31)
             self.checkFor(61)
@@ -308,7 +339,8 @@ class Parser:
             if type == "array":
                 # add array base address to bb0 as const
                 base_addr = self.ir.immediate(value = f'{self.tokenizer.id}_addr')
-                self.ir.setIdent(id=self.tokenizer.id, instruction_id = [base_addr, dimension_list])
+                # in ssa table store [base_addr, dimension_list, stored_flag, killed_flag]
+                self.ir.setIdent(id=self.tokenizer.id, instruction_id = [base_addr, dimension_list, False])
         self.checkFor(70)
 
     # "var" |   "array" "[" number "]" { "[" number "]" }
@@ -405,6 +437,8 @@ class Parser:
         if type == "array":
             base_addr = operant[0]
             dimension = operant[1]
+            # set stored_flag
+            operant[2] = True
             offset_sum = None
             for idx, dim in enumerate(idx_table):
                 if idx == 0:
@@ -572,11 +606,17 @@ class Parser:
     def factor(self):
         operant = None
         if self.inputSym == 61:
+            array_id = self.tokenizer.id
             # find identifier in current block ssa or parent block ssa
             operant, type, idx_table = self.designator()
             if type == "array":
                 base_addr = operant[0]
                 dimension = operant[1]
+                # if stored in potential path
+                if operant[2] == True:
+                    # reset stored_flag
+                    self.ir.bb_list[self.ir.bb_count].ssa_table[array_id][2] = False
+                    self.ir.addInstruction("kill", operant1=self.tokenizer.id)
                 offset_sum = None
                 for idx, dim in enumerate(idx_table):
                     if idx == 0:
@@ -587,7 +627,7 @@ class Parser:
                 off_set = self.ir.addInstruction("mul", operant1=offset_sum, operant2=self.ir.immediate(4)).instruction_id
                 base_addr = self.ir.addInstruction("add", "#BASE", base_addr).instruction_id
                 addr = self.ir.addInstruction("adda", operant1=base_addr, operant2=off_set).instruction_id
-                operant = self.ir.addInstruction("load", operant1=addr).instruction_id
+                operant = self.ir.addLoadInstruction(array_id=array_id, operant=addr).instruction_id
         elif self.inputSym == 60:
             operant = self.ir.immediate(self.tokenizer.number)
             self.checkFor(60)
