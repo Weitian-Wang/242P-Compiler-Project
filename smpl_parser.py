@@ -121,7 +121,7 @@ class IR:
     
     def printSSA(self):
         for bb in self.bb_list:
-            print(bb.bb_id, bb.ssa_table)
+            print(bb.bb_id, {k: v for k,v in bb.ssa_table.items() if type(v) == int})
 
     # return const instruction id if constant exits
     # else create new constant then return instruction id
@@ -292,11 +292,23 @@ class Parser:
 
     # typeDecl indent { "," ident } ";"
     def varDecl(self):
-        self.typeDecl()
+        type, dimension_list = self.typeDecl()
         self.checkFor(61)
+        if type == "var":
+            self.ir.setIdent(id=self.tokenizer.id, instruction_id=0)
+        if type == "array":
+            # add array base address to bb0 as const
+            base_addr = self.ir.immediate(value = f'{self.tokenizer.id}_addr')
+            self.ir.setIdent(id=self.tokenizer.id, instruction_id = [base_addr, dimension_list])
         while self.inputSym == 31:
             self.checkFor(31)
             self.checkFor(61)
+            if type == "var":
+                self.ir.setIdent(id=self.tokenizer.id, instruction_id=0)
+            if type == "array":
+                # add array base address to bb0 as const
+                base_addr = self.ir.immediate(value = f'{self.tokenizer.id}_addr')
+                self.ir.setIdent(id=self.tokenizer.id, instruction_id = [base_addr, dimension_list])
         self.checkFor(70)
 
     # "var" |   "array" "[" number "]" { "[" number "]" }
@@ -304,18 +316,23 @@ class Parser:
         # "var"
         if self.inputSym == 110:
             self.checkFor(110)
+            return "var", None
         elif self.inputSym == 111:
             self.checkFor(111)
-                # "["
+            # "["
             self.checkFor(32)
-            # number
+            # number assume no out of boundary
+            dimension_list = []
+            dimension_list.append(self.tokenizer.number)
             self.checkFor(60)
             # "]"
             self.checkFor(34)
             while self.inputSym == 32:
                 self.checkFor(32)
+                dimension_list.append(self.tokenizer.number)
                 self.checkFor(60)
                 self.checkFor(34)
+            return "array", dimension_list
         else:
             raise Exception
 
@@ -380,22 +397,38 @@ class Parser:
     def assignment(self):
         self.checkFor(100)
         var = self.tokenizer.id
-        self.designator(read=False)
+        operant, type, idx_table = self.designator(read=False)
         self.checkFor(40)
         val = self.expression()
-        self.ir.setIdent(id = var, instruction_id = val)
-    
+        if type == "var":
+            self.ir.setIdent(id = var, instruction_id = val)
+        if type == "array":
+            base_addr = operant[0]
+            dimension = operant[1]
+            offset_sum = None
+            for idx, dim in enumerate(idx_table):
+                if idx == 0:
+                    offset_sum = dim
+                    continue
+                offset_sum =  self.ir.addInstruction("mul", operant1=offset_sum, operant2=dimension[idx]).instruction_id
+                offset_sum =  self.ir.addInstruction("add", operant1=offset_sum, operant2=dim).instruction_id
+            off_set = self.ir.addInstruction("mul", operant1=offset_sum, operant2=self.ir.immediate(4)).instruction_id
+            base_addr = self.ir.addInstruction("add", "#BASE", base_addr).instruction_id
+            addr = self.ir.addInstruction("adda", operant1=base_addr, operant2=off_set).instruction_id
+            self.ir.addInstruction("store", operant1=addr, operant2=val).instruction_id
+
     # "call" ident [ "(" [expression { "," expression } ] ")" ]
     def funcCall(self):
         self.checkFor(101)
         function_name = self.tokenizer.id
         function_instruction = None
         if function_name == "InputNum":
-            function_instruction = self.ir.addInstruction("read")
+            function_instruction = Instruction(instruction_id=-1, op_code="read")
         elif function_name == "OutputNum":
-            function_instruction = self.ir.addInstruction("write")
+            # reserve instruction
+            function_instruction = Instruction(instruction_id=-1, op_code="write", operant1=None)
         elif function_name == "OutputNewLine":
-            function_instruction = self.ir.addInstruction("writeNL")
+            function_instruction = Instruction(instruction_id=-1, op_code="writeNL")
         self.checkFor(61)
         # function with parentheses
         if self.inputSym == 50:
@@ -414,6 +447,9 @@ class Parser:
                     self.expression()
                 # matching closing parenthese
             self.checkFor(35)
+            function_instruction.instruction_id = self.ir.pc
+            self.ir.bb_list[self.ir.bb_count].instruction_list.append(function_instruction)
+            self.ir.pc += 1
         # function without parentheses, no parameters allowed
         return function_instruction.instruction_id
     
@@ -509,17 +545,24 @@ class Parser:
     # ident { "[" expression "]" }
     # if called from assignment, read = false
     # called elsewhere, read = True
+    # combination read var, write var, read array, write array
     def designator(self, read: bool = True):
         operant = None
         if read:
             # get token from current block ssa table
             operant = self.ir.getIdent(self.tokenizer.id)
         self.checkFor(61)
+        type = "var"
+        # array load
+        idx_table = []
+        if self.inputSym == 32:
+            type = "array"
+            operant = self.ir.getIdent(self.tokenizer.id)
         while self.inputSym == 32:
             self.checkFor(32)
-            self.expression()
+            idx_table.append(self.expression())
             self.checkFor(34)
-        return operant
+        return operant, type, idx_table
     
     # designator|number|"(" expression ")"|funcCall
     # = designator = indent
@@ -530,7 +573,21 @@ class Parser:
         operant = None
         if self.inputSym == 61:
             # find identifier in current block ssa or parent block ssa
-            operant = self.designator()
+            operant, type, idx_table = self.designator()
+            if type == "array":
+                base_addr = operant[0]
+                dimension = operant[1]
+                offset_sum = None
+                for idx, dim in enumerate(idx_table):
+                    if idx == 0:
+                        offset_sum = dim
+                        continue
+                    offset_sum = self.ir.addInstruction("mul", operant1=offset_sum, operant2=dimension[idx]).instruction_id
+                    offset_sum = self.ir.addInstruction("add", operant1=offset_sum, operant2=dim).instruction_id
+                off_set = self.ir.addInstruction("mul", operant1=offset_sum, operant2=self.ir.immediate(4)).instruction_id
+                base_addr = self.ir.addInstruction("add", "#BASE", base_addr).instruction_id
+                addr = self.ir.addInstruction("adda", operant1=base_addr, operant2=off_set).instruction_id
+                operant = self.ir.addInstruction("load", operant1=addr).instruction_id
         elif self.inputSym == 60:
             operant = self.ir.immediate(self.tokenizer.number)
             self.checkFor(60)
