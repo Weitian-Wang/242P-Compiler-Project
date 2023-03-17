@@ -1,1 +1,1 @@
-function_instruction
+kill

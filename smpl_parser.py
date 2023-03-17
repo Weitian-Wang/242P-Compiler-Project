@@ -191,7 +191,27 @@ class IR:
         target.instruction_list.append(instruction)
         self.pc += 1
         return instruction
-        
+
+    def addAddaInstruction(self, array_id, operant1 = None, operant2 =None, target: Basic_Block = None):
+        if target is None:
+            target = self.bb_list[self.bb_count]
+        # search the closest dominator then the most distant
+        kill_flag = False
+        for dominator in target.dominator:
+            for instruction in reversed(dominator.instruction_list):
+                # search no further beyond kill instruction in the nearest dominator bb
+                if instruction.op_code == "kill" and instruction.operant1 == array_id:
+                    kill_flag = True
+                    break
+                if instruction.op_code == "adda" and instruction.operant1 == operant1 and instruction.operant2 == operant2:
+                    return instruction
+            if kill_flag:
+                break
+        instruction = Instruction(self.pc, "adda", operant1=operant1, operant2=operant2)
+        target.instruction_list.append(instruction)
+        self.pc += 1
+        return instruction
+
     def addPhi(self, join_bb: Basic_Block, left_bb: Basic_Block, right_bb: Basic_Block):
         for ident, inst_id in join_bb.ssa_table.items():
             # if not initialized set to constant 0
@@ -616,7 +636,7 @@ class Parser:
                 if operant[2] == True:
                     # reset stored_flag
                     self.ir.bb_list[self.ir.bb_count].ssa_table[array_id][2] = False
-                    self.ir.addInstruction("kill", operant1=self.tokenizer.id)
+                    self.ir.addInstruction("kill", operant1=array_id)
                 offset_sum = None
                 for idx, dim in enumerate(idx_table):
                     if idx == 0:
@@ -626,7 +646,7 @@ class Parser:
                     offset_sum = self.ir.addInstruction("add", operant1=offset_sum, operant2=dim).instruction_id
                 off_set = self.ir.addInstruction("mul", operant1=offset_sum, operant2=self.ir.immediate(4)).instruction_id
                 base_addr = self.ir.addInstruction("add", "#BASE", base_addr).instruction_id
-                addr = self.ir.addInstruction("adda", operant1=base_addr, operant2=off_set).instruction_id
+                addr = self.ir.addAddaInstruction(array_id=array_id, operant1=base_addr, operant2=off_set).instruction_id
                 operant = self.ir.addLoadInstruction(array_id=array_id, operant=addr).instruction_id
         elif self.inputSym == 60:
             operant = self.ir.immediate(self.tokenizer.number)

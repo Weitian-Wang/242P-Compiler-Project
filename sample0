@@ -1,16 +1,14 @@
 main
 var a, b;
-array[4][3][2] x;
+array[4] x;
 {
     let a <- call InputNum ();
     let b <- a; 
-    let i <- 0;
-    let j <- i;
-    let x[a][i][b] <- b + 2;
+    let x[a] <- b + 2;
     if b<= 2 then 
-        let x[b][j][a] <- x[a][j][b] + 2 
+        let x[b] <- x[a] + 2 
     else 
-        let b <- x[a][i][b] + 2 
+        let b <- x[b] + 2 
     fi; 
-    call OutputNum(x[a][i][b])
+    call OutputNum(x[a])
 }.
