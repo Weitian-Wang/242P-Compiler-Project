@@ -1,12 +1,12 @@
 digraph G{
-bb0[shape=record, label="<b>BB0|{0: const #x_addr|2: const #2|4: const #4}"];
-bb1[shape=record, label="<b>BB1|{1: read|3: add (1) (2)|5: mul (1) (4)|6: add (#BASE) (0)|7: adda (6) (5)|8: store (7) (3)|9: cmp (1) (2)|10: bgt (9) (17)}"];
-bb2[shape=record, label="<b>BB2|{11: kill (x)|12: adda (6) (5)|13: load (12)|14: add (13) (2)|15: store (12) (14)|16: bra (21)}"];
-bb3[shape=record, label="<b>BB3|{17: kill (x)|18: adda (6) (5)|19: load (18)|20: add (19) (2)}"];
-bb4[shape=record, label="<b>BB4|{21: phi (20) (1)|22: kill (x)|23: adda (6) (5)|24: load (23)|25: write (24)|26: end}"];
+bb0[shape=record, label="<b>BB0|{0: const #a_addr|2: const #0|3: const #4|11: const #10|14: const #1}"];
+bb1[shape=record, label="<b>BB1|{1: read|4: mul (2) (3)|5: add (#BASE) (0)|6: adda (5) (4)|7: store (6) (1)}"];
+bb2[shape=record, label="<b>BB2|{8: phi (2) (15)|9: phi (2) (20)|10: phi (1) (15)|12: cmp (8) (11)|13: bge (12) (22)}"];
+bb3[shape=record, label="<b>BB3|{15: add (10) (14)|16: kill (a)|17: mul (15) (3)|18: adda (5) (17)|19: load (18)|20: add (19) (14)|21: bra (8)}"];
+bb4[shape=record, label="<b>BB4|{22: write (8)|23: kill (a)|24: mul (8) (3)|25: adda (5) (24)|26: load (25)|27: write (26)|28: end}"];
 bb0:s -> bb1:n [label="fall-through"];
-bb1:s -> bb3:n [label="branch"];
 bb1:s -> bb2:n [label="fall-through"];
 bb2:s -> bb4:n [label="branch"];
-bb3:s -> bb4:n [label="fall-through"];
+bb2:s -> bb3:n [label="fall-through"];
+bb3:s -> bb2:n [label="branch"];
 }

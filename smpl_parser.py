@@ -161,7 +161,7 @@ class IR:
 
         # Common Subexpression Elimination
         # Exclude phi
-        if op_code != "phi":
+        if op_code != "phi" and op_code != "kill":
             for dominator in target.dominator:
                 for instruction in dominator.instruction_list:
                     if instruction.op_code == op_code and instruction.operant1 == operant1 and instruction.operant2 == operant2:
@@ -233,6 +233,9 @@ class IR:
             # if not initialized set to constant 0
             left_inst_id = loop_header_bb.ssa_table.get(ident, None)
             right_inst_id = ssa_table_ahead.get(ident, None)
+            if type(left_inst_id) == list:
+                loop_header_bb.ssa_table[ident] = [left_inst_id[0], left_inst_id[1], left_inst_id[2] or right_inst_id[2]]
+                break
             if left_inst_id != right_inst_id:
                 # set operant2 to identifier to search later
                 loop_header_bb.ssa_table[ident] = self.addInstruction(op_code='phi', operant1=left_inst_id, operant2=ident, target=loop_header_bb).instruction_id
